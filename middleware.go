@@ -32,10 +32,16 @@ func RateLimit(db *sql.DB, rdb *redis.Client, ruleCache *RuleCache, next http.Ha
 			next.ServeHTTP(w, r)
 			return
 		}
+
+		//seting custom headers to http response packet about rate-limting info
+		w.Header().Set("X-Rate-Limit-Limit", fmt.Sprintf("%d", rule.Limit))
+		w.Header().Set("X-Rate-Limit-Remaining", fmt.Sprintf("%d", remaining))
+		w.Header().Set("X-Rate-Limit-Reset", fmt.Sprintf("%d", resetTime))
+
 		if !allowed {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusTooManyRequests)
-			w.Write([]byte(fmt.Sprintf(`{"error": "rate limit exceeded . Try again later`)))
+			w.Write([]byte(`{"error": "rate limit exceeded . Try again later`))
 			return
 		}
 		next.ServeHTTP(w, r)
