@@ -1,4 +1,4 @@
-package main
+package database
 
 import (
 	"context"
@@ -19,7 +19,7 @@ type Clients struct {
 func InitDB() (*Clients, error) {
 	pgConnStr := os.Getenv("DATABASE_URL")
 	if pgConnStr == "" {
-		return nil, fmt.Errorf("DATABASE_URL is not set")
+		pgConnStr = "postgres://postgres:password@localhost:5432/ratelimiter?sslmode=disable"
 	}
 
 	db, err := sql.Open("postgres", pgConnStr)
@@ -32,7 +32,7 @@ func InitDB() (*Clients, error) {
 
 	redisAddr := os.Getenv("REDDIS_ADDR")
 	if redisAddr == "" {
-		return nil, fmt.Errorf("REDDIS_ADDR not set")
+		redisAddr = "localhost:6379"
 	}
 
 	rdb := redis.NewClient(&redis.Options{

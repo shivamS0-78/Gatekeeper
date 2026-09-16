@@ -3,17 +3,19 @@ package main
 import (
 	"log"
 	"net/http"
+	"rate-limiter-api/internal/database"
+	"rate-limiter-api/internal/ratelimiter"
 )
 
 func main() {
-	clients, err := InitDB()
+	clients, err := database.InitDB()
 	if err != nil {
 		log.Fatalf("Failed to Initialize DB : %v", err)
 	}
 
 	defer clients.PG.Close()
 
-	ruleCache := NewRuleCache()
+	ruleCache := ratelimiter.NewRuleCache()
 
 	mux := http.NewServeMux()
 
@@ -23,7 +25,7 @@ func main() {
 		w.Write([]byte(`{"message": "request processed successfully"}`))
 	})
 
-	mux.Handle("/api/resource", RateLimit(clients.PG, clients.Redis, ruleCache, apiHandler))
+	mux.Handle("/api/resource", ratelimiter.RateLimit(clients.PG, clients.Redis, ruleCache, apiHandler))
 
 	log.Println("Rate limiter running at port 8080")
 	if err := http.ListenAndServe(":8080", mux); err != nil {

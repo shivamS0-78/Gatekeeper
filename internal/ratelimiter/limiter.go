@@ -1,4 +1,4 @@
-package main
+package ratelimiter
 
 import (
 	"context"
@@ -42,7 +42,7 @@ func (rl *RateLimiter) AllowSlidingWindow(ctx context.Context, userId string, li
 
 	resetTime := now.Add(window).Unix()
 
-	if currentCOunt > int64(limit) {
+	if currentCOunt >= int64(limit) {
 		return false, remaining, resetTime, nil
 	}
 

@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"rate-limiter-api/internal/ratelimiter"
 	"strings"
 	"time"
 
@@ -30,8 +31,10 @@ type Config struct {
 }
 
 type Gateway struct {
-	routes []Route
-	client *http.Client
+	routes    []Route
+	client    *http.Client
+	limiter   *ratelimiter.RateLimiter
+	ruleCache *ratelimiter.RuleCache
 }
 
 var hopByHopHeaders = []string{
