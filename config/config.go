@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -30,6 +31,7 @@ type Config struct {
 
 type Gateway struct {
 	routes []Route
+	client *http.Client
 }
 
 var hopByHopHeaders = []string{
@@ -126,7 +128,7 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	resp, err := http.DefaultClient.Do(outReq)
+	resp, err := g.client.Do(outReq)
 	if err != nil {
 		http.Error(w, "Bad Gateway", http.StatusBadGateway)
 		return
@@ -152,6 +154,17 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func main() {
+	transport := &http.Transport{
+		MaxIdleConns:        100,
+		MaxIdleConnsPerHost: 20,
+		MaxConnsPerHost:     50,
+		IdleConnTimeout:     90 * time.Second,
+	}
+
+	client := &http.Client{
+		Transport: transport,
+	}
+
 	config, err := LoadConfig("config.yaml")
 	if err != nil {
 		log.Fatal(err)
@@ -159,6 +172,7 @@ func main() {
 
 	gateway := Gateway{
 		routes: config.Routes,
+		client: client,
 	}
 
 	server := http.Server{
