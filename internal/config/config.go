@@ -24,6 +24,7 @@ type Route struct {
 	Path        string
 	Upstream    string
 	StripPrefix bool
+	Retries     int
 }
 
 type Config struct {
@@ -86,6 +87,55 @@ func removeHopByHopHeaders(header http.Header) {
 	for _, h := range hopByHopHeaders {
 		header.Del(h)
 	}
+}
+
+func isRetryableStatus(status int) bool {
+	switch status {
+	case http.StatusBadGateway, // 502
+		http.StatusServiceUnavailable, // 503
+		http.StatusGatewayTimeout:     // 504
+		return true
+	default:
+		return false
+	}
+}
+
+func (g *Gateway) doWithRetry(req *http.Request, retries int) (*http.Response, error) {
+	var resp *http.Response
+	var err error
+
+	for attempt := 0; attempt <= retries; attempt++ {
+		// Recreate request body for retry if necessary
+		if attempt > 0 && req.GetBody != nil {
+			body, getBodyErr := req.GetBody()
+			if getBodyErr != nil {
+				return nil, getBodyErr
+			}
+			req.Body = body
+		}
+
+		resp, err = g.client.Do(req)
+		if err == nil {
+			// Retry certain upstream HTTP failures
+			if !isRetryableStatus(resp.StatusCode) {
+				return resp, nil
+			}
+			if attempt == retries {
+				return resp, nil
+			}
+			resp.Body.Close()
+		} else {
+			if attempt == retries {
+				return nil, err
+			}
+		}
+
+		// Exponential backoff
+		delay := 100 * time.Millisecond * time.Duration(1<<attempt)
+		time.Sleep(delay)
+	}
+
+	return resp, err
 }
 
 func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -182,8 +232,13 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	resp, err := g.client.Do(outReq)
+	resp, err := g.doWithRetry(outReq, route.Retries)
+
 	if err != nil {
+		if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+			http.Error(w, "Gateway Timeout", http.StatusGatewayTimeout)
+			return
+		}
 		http.Error(w, "Bad Gateway", http.StatusBadGateway)
 		return
 	}
@@ -220,10 +275,18 @@ func main() {
 		MaxIdleConnsPerHost: 20,
 		MaxConnsPerHost:     50,
 		IdleConnTimeout:     90 * time.Second,
+
+		DialContext: (&net.Dialer{
+			Timeout: 5 * time.Second,
+		}).DialContext,
+
+		TLSHandshakeTimeout:   5 * time.Second,
+		ResponseHeaderTimeout: 10 * time.Second,
 	}
 
 	client := &http.Client{
 		Transport: transport,
+		Timeout:   15 * time.Second,
 	}
 
 	config, err := LoadConfig("config.yaml")
