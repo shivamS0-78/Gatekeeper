@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/redis/go-redis/v9"
 	"gopkg.in/yaml.v3"
 )
 
@@ -88,6 +89,56 @@ func removeHopByHopHeaders(header http.Header) {
 }
 
 func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
+	userID := r.Header.Get("X-User-ID")
+	if userID == "" {
+		userID = r.RemoteAddr
+	}
+
+	rule, err := g.ruleCache.GetRule(nil, userID)
+	if err != nil {
+		log.Printf("[Rule error] %v", err)
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		return
+	}
+
+	allowed, remaining, resetTime, err :=
+		g.limiter.AllowSlidingWindow(
+			ctx,
+			userID,
+			rule.Limit,
+			rule.Window,
+		)
+
+	if err != nil {
+		log.Printf("[Rate limiter error] %v", err)
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set(
+		"X-Rate-Limit-Limit",
+		fmt.Sprintf("%d", rule.Limit),
+	)
+
+	w.Header().Set(
+		"X-Rate-Limit-Remaining",
+		fmt.Sprintf("%d", remaining),
+	)
+
+	w.Header().Set(
+		"X-Rate-Limit-Reset",
+		fmt.Sprintf("%d", resetTime),
+	)
+
+	if !allowed {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusTooManyRequests)
+		w.Write([]byte(`{"error":"rate limit exceeded"}`))
+		return
+	}
+
 	route, ok := g.MatchRoute(r.URL.Path)
 
 	if !ok {
@@ -157,6 +208,13 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func main() {
+	rdb := redis.NewClient(&redis.Options{
+		Addr: "localhost:6379",
+	})
+
+	limiter := ratelimiter.NewRateLimiter(rdb)
+	ruleCache := ratelimiter.NewRuleCache()
+
 	transport := &http.Transport{
 		MaxIdleConns:        100,
 		MaxIdleConnsPerHost: 20,
@@ -174,8 +232,10 @@ func main() {
 	}
 
 	gateway := Gateway{
-		routes: config.Routes,
-		client: client,
+		routes:    config.Routes,
+		client:    client,
+		limiter:   limiter,
+		ruleCache: ruleCache,
 	}
 
 	server := http.Server{
