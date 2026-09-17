@@ -3,6 +3,7 @@ package ratelimiter
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -47,4 +48,27 @@ func (rl *RateLimiter) AllowSlidingWindow(ctx context.Context, userId string, li
 	}
 
 	return true, remaining, resetTime, nil
+}
+
+func SetRateLimitHeaders(w http.ResponseWriter, limit, remaining, reset int64) {
+	w.Header().Set(
+		"X-Rate-Limit-Limit",
+		fmt.Sprintf("%d", limit),
+	)
+
+	w.Header().Set(
+		"X-Rate-Limit-Remaining",
+		fmt.Sprintf("%d", remaining),
+	)
+
+	w.Header().Set(
+		"X-Rate-Limit-Reset",
+		fmt.Sprintf("%d", reset),
+	)
+}
+
+func WriteDenied(w http.ResponseWriter) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusTooManyRequests)
+	w.Write([]byte(`{"error":"rate limit exceeded"}`))
 }

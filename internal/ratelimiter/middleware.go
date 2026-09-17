@@ -3,12 +3,15 @@ package ratelimiter
 import (
 	"context"
 	"database/sql"
-	"fmt"
 	"log"
 	"net/http"
 
 	"github.com/redis/go-redis/v9"
 )
+
+func ratelimiterSetHeaders(w http.ResponseWriter, rule Rule, remaining, resetTime int64) {
+	SetRateLimitHeaders(w, int64(rule.Limit), remaining, resetTime)
+}
 
 func RateLimit(db *sql.DB, rdb *redis.Client, ruleCache *RuleCache, next http.Handler) http.Handler {
 	limiter := NewRateLimiter(rdb)
@@ -34,14 +37,10 @@ func RateLimit(db *sql.DB, rdb *redis.Client, ruleCache *RuleCache, next http.Ha
 		}
 
 		//seting custom headers to http response packet about rate-limting info
-		w.Header().Set("X-Rate-Limit-Limit", fmt.Sprintf("%d", rule.Limit))
-		w.Header().Set("X-Rate-Limit-Remaining", fmt.Sprintf("%d", remaining))
-		w.Header().Set("X-Rate-Limit-Reset", fmt.Sprintf("%d", resetTime))
+		ratelimiterSetHeaders(w, rule, remaining, resetTime)
 
 		if !allowed {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusTooManyRequests)
-			w.Write([]byte(`{"error": "rate limit exceeded . Try again later`))
+			WriteDenied(w)
 			return
 		}
 		next.ServeHTTP(w, r)

@@ -5,11 +5,14 @@ routes :
   - path: /api/users
     upstream : http://localhost:9000
     strip_prefix: true
+    retries : 2
 
   - path: /api/orders
     upstream : http://localhost:9001
     strip_prefix: true
+    retries : 2
 
   - path: /api/auth
     upstream : http://localhost:9002
     strip_prefix: true
+    retries : 2 
