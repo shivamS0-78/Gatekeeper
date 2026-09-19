@@ -68,7 +68,7 @@ func setForwardedHeaders(outReq *http.Request, r *http.Request) {
 
 func isRetryableStatus(status int) bool {
 	switch status {
-	case http.StatusBadGateway,      // 502
+	case http.StatusBadGateway, // 502
 		http.StatusServiceUnavailable, // 503
 		http.StatusGatewayTimeout:     // 504
 		return true
@@ -115,7 +115,11 @@ func (p *ReverseProxy) doWithRetry(req *http.Request, retries int) (*http.Respon
 
 		// Exponential backoff
 		delay := 100 * time.Millisecond * time.Duration(1<<attempt)
-		time.Sleep(delay)
+		select {
+		case <-time.After(delay):
+		case <-req.Context().Done():
+			return nil, req.Context().Err()
+		}
 	}
 
 	return resp, err
