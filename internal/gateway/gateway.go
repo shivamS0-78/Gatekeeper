@@ -16,6 +16,13 @@ type Gateway struct {
 	limiter   *ratelimiter.RateLimiter
 	ruleCache *ratelimiter.RuleCache
 	proxy     *proxy.ReverseProxy
+
+	nextUpstream atomic.Uint64
+}
+
+func (g *Gateway) selectUpstream(route *config.Route) string {
+	index := g.nextUpstream.Add(1) - 1
+	return route.Upstreams[index%uint64(len(route.Upstreams))]
 }
 
 func New(routes []config.Route, limiter *ratelimiter.RateLimiter,
@@ -88,7 +95,8 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	target, err := url.Parse(route.Upstream)
+	upstream := g.selectUpstream(route)
+	target, err := url.Parse(upstream)
 	if err != nil {
 		http.Error(w, "Invalid upstream", http.StatusBadGateway)
 		return

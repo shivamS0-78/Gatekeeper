@@ -3,16 +3,25 @@ server:
 
 routes :
   - path: /api/users
-    upstream : http://localhost:9000
+    upstreams : 
+      - http://localhost:9000
+      - http://localhost:9010
+      - http://localhost:9020
     strip_prefix: true
     retries : 2
 
   - path: /api/orders
-    upstream : http://localhost:9001
+    upstreams : 
+      - http://localhost:9001
+      - http://localhost:9011
+      - http://localhost:9021
     strip_prefix: true
     retries : 2
 
   - path: /api/auth
-    upstream : http://localhost:9002
+    upstream : 
+      - http://localhost:9002
+      - http://localhost:9012
+      - http://localhost:9022
     strip_prefix: true
     retries : 2 
