@@ -69,6 +69,7 @@ func main() {
 	rp := proxy.New(client)
 
 	gw := gateway.New(cfg.Routes, limiter, ruleCache, rp)
+	gw.StartHealthChecks(5 * time.Second)
 
 	server := &http.Server{
 		Addr:              fmt.Sprintf(":%d", cfg.Server.Port),

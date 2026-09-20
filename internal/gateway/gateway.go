@@ -5,11 +5,18 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync/atomic"
+	"time"
 
 	"rate-limiter-api/internal/config"
 	"rate-limiter-api/internal/proxy"
 	"rate-limiter-api/internal/ratelimiter"
 )
+
+type Upstream struct {
+	URL     string
+	Healthy bool
+}
 
 type Gateway struct {
 	routes    []config.Route
@@ -17,7 +24,43 @@ type Gateway struct {
 	ruleCache *ratelimiter.RuleCache
 	proxy     *proxy.ReverseProxy
 
+	upstreams    map[string][]*Upstream
 	nextUpstream atomic.Uint64
+	healthClient *http.Client
+}
+
+func (g *Gateway) checkUpstream(upstream *Upstream) {
+	resp, err := g.healthClient.Get(upstream.URL + "/health")
+
+	if err != nil {
+		upstream.Healthy = false
+		return
+	}
+
+	defer resp.Body.Close()
+
+	upstream.Healthy = resp.StatusCode >= 200 && resp.StatusCode < 300
+}
+
+func (g *Gateway) checkAllUpstreams() {
+	for _, upstreams := range g.upstreams {
+		for _, upstream := range upstreams {
+			g.checkUpstream(upstream)
+		}
+	}
+}
+
+func (g *Gateway) StartHealthChecks(interval time.Duration) {
+	ticker := time.NewTicker(interval)
+
+	go func() {
+		defer ticker.Stop()
+		for {
+			g.checkAllUpstreams()
+
+			<-ticker.C
+		}
+	}()
 }
 
 func (g *Gateway) selectUpstream(route *config.Route) string {
@@ -27,11 +70,32 @@ func (g *Gateway) selectUpstream(route *config.Route) string {
 
 func New(routes []config.Route, limiter *ratelimiter.RateLimiter,
 	ruleCache *ratelimiter.RuleCache, rp *proxy.ReverseProxy) *Gateway {
+
+	upstreams := make(map[string][]*Upstream)
+
+	for _, route := range routes {
+		for _, url := range route.Upstreams {
+			upstreams[route.Path] = append(
+				upstreams[route.Path],
+				&Upstream{
+					URL:     url,
+					Healthy: true,
+				},
+			)
+		}
+	}
+
+	healthClient := &http.Client{
+		Timeout: 2 * time.Second,
+	}
+
 	return &Gateway{
-		routes:    routes,
-		limiter:   limiter,
-		ruleCache: ruleCache,
-		proxy:     rp,
+		routes:       routes,
+		limiter:      limiter,
+		ruleCache:    ruleCache,
+		proxy:        rp,
+		upstreams:    upstreams,
+		healthClient: healthClient,
 	}
 }
 
