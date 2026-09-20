@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -16,6 +17,7 @@ import (
 type Upstream struct {
 	URL     string
 	Healthy bool
+	mu      sync.RWMutex
 }
 
 type Gateway struct {
@@ -29,17 +31,31 @@ type Gateway struct {
 	healthClient *http.Client
 }
 
+func (u *Upstream) isHealthy() bool {
+	u.mu.RLock()
+	defer u.mu.RUnlock()
+
+	return u.Healthy
+}
+
+func (u *Upstream) SetHealthy(healthy bool) {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+
+	u.Healthy = healthy
+}
+
 func (g *Gateway) checkUpstream(upstream *Upstream) {
 	resp, err := g.healthClient.Get(upstream.URL + "/health")
 
 	if err != nil {
-		upstream.Healthy = false
+		upstream.SetHealthy(false)
 		return
 	}
 
 	defer resp.Body.Close()
 
-	upstream.Healthy = resp.StatusCode >= 200 && resp.StatusCode < 300
+	upstream.SetHealthy(resp.StatusCode >= 200 && resp.StatusCode < 300)
 }
 
 func (g *Gateway) checkAllUpstreams() {
@@ -64,8 +80,23 @@ func (g *Gateway) StartHealthChecks(interval time.Duration) {
 }
 
 func (g *Gateway) selectUpstream(route *config.Route) string {
-	index := g.nextUpstream.Add(1) - 1
-	return route.Upstreams[index%uint64(len(route.Upstreams))]
+
+	upstreams := g.upstreams[route.Path]
+
+	if len(upstreams) == 0 {
+		return ""
+	}
+	start := g.nextUpstream.Add(1) - 1
+
+	for i := uint64(0); i < uint64(len(upstreams)); i++ {
+		index := (start + i) % uint64(len(upstreams))
+
+		if upstreams[index].isHealthy() {
+			return upstreams[index].URL
+		}
+	}
+
+	return ""
 }
 
 func New(routes []config.Route, limiter *ratelimiter.RateLimiter,
@@ -160,6 +191,11 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	upstream := g.selectUpstream(route)
+
+	if upstream == "" {
+		http.Error(w, "No heakthy upstream available", http.StatusServiceUnavailable)
+	}
+
 	target, err := url.Parse(upstream)
 	if err != nil {
 		http.Error(w, "Invalid upstream", http.StatusBadGateway)
