@@ -1,7 +1,9 @@
 package gateway
 
 import (
+	"io"
 	"log"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -147,6 +149,101 @@ func apiHandler(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte(`{"error": "no route matched"}`))
 }
 
+func (g *Gateway) markUpstreamUnhealthy(
+	route *config.Route,
+	url string,
+) {
+	upstreams := g.upstreams[route.Path]
+
+	for _, upstream := range upstreams {
+		if upstream.URL == url {
+			upstream.SetHealthy(false)
+			return
+		}
+	}
+}
+
+func (g *Gateway) proxyWithFailover(
+	w http.ResponseWriter,
+	r *http.Request,
+	route *config.Route,
+) {
+	for attempt := 0; attempt <= route.Retries; attempt++ {
+
+		upstream := g.selectUpstream(route)
+
+		if upstream == "" {
+			http.Error(
+				w,
+				"No healthy upstream available",
+				http.StatusServiceUnavailable,
+			)
+			return
+		}
+
+		target, err := url.Parse(upstream)
+		if err != nil {
+			http.Error(w, "Invalid upstream", http.StatusBadGateway)
+			return
+		}
+
+		req := g.proxy.PrepareRequest(
+			r,
+			target,
+			route.Path,
+		)
+
+		resp, err := g.proxy.Do(req)
+
+		// Network / connection failure
+		if err != nil {
+			g.markUpstreamUnhealthy(route, upstream)
+
+			if attempt == route.Retries {
+				if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+					http.Error(w, "Gateway Timeout", http.StatusGatewayTimeout)
+				} else {
+					http.Error(w, "Bad Gateway", http.StatusBadGateway)
+				}
+				return
+			}
+
+			continue
+		}
+
+		// Retryable upstream response
+		if proxy.IsRetryableStatus(resp.StatusCode) {
+			resp.Body.Close()
+
+			if attempt == route.Retries {
+				http.Error(w, "Bad Gateway", resp.StatusCode)
+				return
+			}
+
+			continue
+		}
+
+		// Successful/non-retryable response
+		defer resp.Body.Close()
+
+		proxy.RemoveHopByHopHeaders(resp.Header)
+
+		for key, values := range resp.Header {
+			for _, value := range values {
+				w.Header().Add(key, value)
+			}
+		}
+
+		w.WriteHeader(resp.StatusCode)
+
+		if _, err := io.Copy(w, resp.Body); err != nil {
+			log.Printf("Error copying response: %v", err)
+		}
+
+		return
+	}
+}
+
 func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
@@ -190,28 +287,5 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	upstream := g.selectUpstream(route)
-
-	if upstream == "" {
-		http.Error(w, "No heakthy upstream available", http.StatusServiceUnavailable)
-	}
-
-	target, err := url.Parse(upstream)
-	if err != nil {
-		http.Error(w, "Invalid upstream", http.StatusBadGateway)
-		return
-	}
-
-	g.proxy.ServeHTTP(w, r, proxy.ForwardOptions{
-		Upstream:    target,
-		StripPrefix: stripPrefixPath(route),
-		Retries:     route.Retries,
-	})
-}
-
-func stripPrefixPath(route *config.Route) string {
-	if route.StripPrefix {
-		return route.Path
-	}
-	return ""
+	g.proxyWithFailover(w, r, route)
 }

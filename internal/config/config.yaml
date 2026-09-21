@@ -19,7 +19,7 @@ routes :
     retries : 2
 
   - path: /api/auth
-    upstream : 
+    upstreams : 
       - http://localhost:9002
       - http://localhost:9012
       - http://localhost:9022

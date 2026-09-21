@@ -11,10 +11,10 @@ type ServerConfig struct {
 }
 
 type Route struct {
-	Path        string
-	Upstreams   []string
-	StripPrefix bool
-	Retries     int
+	Path        string   `yaml:"path"`
+	Upstreams   []string `yaml:"upstreams"`
+	StripPrefix bool     `yaml:"strip_prefix"`
+	Retries     int      `yaml:"retries"`
 }
 
 type Config struct {
