@@ -1,6 +1,6 @@
 # Gatekeeper
 
-A high-performance, resilient API Gateway and Rate Limiter written in Go. Gatekeeper protects backend services from traffic spikes and abuse using a Redis-backed Sliding Window rate-limiting algorithm, client-aware rule caching, reverse proxying, dynamic health checking, and automatic failover.
+A high-performance, resilient API Gateway and Rate Limiter written in Go. Gatekeeper protects backend services from traffic spikes and abuse using a Redis-backed rate-limiting algorithm, client-aware rule caching, reverse proxying, dynamic health checking, and automatic failover.
 
 ---
 
