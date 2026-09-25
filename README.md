@@ -28,6 +28,7 @@ A high-performance, resilient API Gateway and Rate Limiter written in Go. Gateke
 
 ## Architecture
 
+<img width="2816" height="1536" alt="Gemini_Generated_Image_1wxr3m1wxr3m1wxr" src="https://github.com/user-attachments/assets/945fc16e-da27-409a-8b09-709ab139024f" />
 
 
 ## Project Structure
